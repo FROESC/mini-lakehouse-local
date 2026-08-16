@@ -1,47 +1,43 @@
 import json
-import random
 from datetime import datetime, timedelta
 from pathlib import Path
-from faker import Faker
+import requests
 
-fake = Faker('pt_BR')
 
-CATEGORIAS = ['Eletrônicos', 'Vestuário', 'Alimentos', 'Livros', 'Eletrodomésticos']
+def fetch_usd_exchange_rate(days_back=30):
+    """Busca o histórico da cotação do Dólar (PTAX) na API do Banco Central do Brasil."""
+    end_date = datetime.now().strftime("%d/%m/%Y")
+    start_date = (datetime.now() - timedelta(days=days_back)).strftime(
+        "%d/%m/%Y"
+    )
 
-def generate_events(num_records=100):
-    events = []
-    base_date = datetime.now()
-    
-    for _ in range(num_records):
-        # Simula datas nos últimos 3 dias
-        random_days = random.randint(0, 2)
-        event_time = base_date - timedelta(days=random_days, minutes=random.randint(0, 1440))
-        
-        event = {
-            "transaction_id": fake.uuid4(),
-            "customer_id": random.randint(1000, 1050),
-            "product_category": random.choice(CATEGORIAS),
-            "amount": round(random.uniform(10.0, 1500.0), 2),
-            "status": random.choice(["COMPLETED", "COMPLETED", "CANCELLED", "PENDING"]),
-            "timestamp": event_time.isoformat()
-        }
-        events.append(event)
-    
-    # Injeta alguns duplicados propositais para tratarmos na Silver
-    events.append(events[0])
-    events.append(events[1])
-    
-    return events
+    # Código 10813 = Cotação do Dólar americano (venda) no sistema SGS do BACEN
+    url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.10813/dados?formato=json&dataInicial={start_date}&dataFinal={end_date}"
+
+    print(f"[BRONZE] Requisitando dados da API do Bacen: {url}")
+    response = requests.get(url, timeout=10)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        raise Exception(f"Erro ao acessar API: Status {response.status_code}")
+
 
 def save_raw_events():
     Path("data/1_bronze").mkdir(parents=True, exist_ok=True)
-    data = generate_events(150)
-    
-    filename = f"data/1_bronze/events_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+
+    # Busca dados reais da API
+    raw_data = fetch_usd_exchange_rate(days_back=60)
+
+    # Salva o JSON bruto preservando a camada Bronze (Raw)
+    filename = f"data/1_bronze/usd_rate_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        
-    print(f"[BRONZE GENERATOR] {len(data)} eventos salvos em {filename}")
+        json.dump(raw_data, f, indent=2, ensure_ascii=False)
+
+    print(
+        f"[BRONZE GENERATOR] {len(raw_data)} registros reais de câmbio salvos em {filename}"
+    )
+
 
 if __name__ == "__main__":
     save_raw_events()

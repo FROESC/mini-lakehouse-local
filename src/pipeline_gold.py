@@ -1,8 +1,9 @@
 from pathlib import Path
 import duckdb
 
+
 def process_gold():
-    silver_file = "data/2_silver/transactions_clean.parquet"
+    silver_file = "data/2_silver/usd_cotacao_clean.parquet"
     if not Path(silver_file).exists():
         print("[GOLD] Arquivo Silver não encontrado.")
         return
@@ -10,39 +11,28 @@ def process_gold():
     gold_dir = Path("data/3_gold")
     gold_dir.mkdir(parents=True, exist_ok=True)
 
-    # Conexão com DuckDB em memória
     con = duckdb.connect()
 
-    # Query 1: Faturamento e total de vendas por Categoria
-    query_category = f"""
+    # Query Analítica: Métricas de Câmbio + Média Móvel de 7 dias
+    query_gold = f"""
         SELECT 
-            product_category,
-            COUNT(transaction_id) AS total_vendas,
-            ROUND(SUM(amount), 2) AS faturamento_total,
-            ROUND(AVG(amount), 2) AS ticket_medio
+            dt_cotacao,
+            cotacao_usd,
+            ROUND(AVG(cotacao_usd) OVER (
+                ORDER BY dt_cotacao 
+                ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+            ), 4) AS media_movel_7d
         FROM '{silver_file}'
-        GROUP BY product_category
-        ORDER BY faturamento_total DESC
+        ORDER BY dt_cotacao DESC
     """
-    df_gold_category = con.execute(query_category).df()
-    df_gold_category.to_parquet(gold_dir / "sales_by_category.parquet", index=False)
 
-    # Query 2: Faturamento Diário
-    query_daily = f"""
-        SELECT 
-            date,
-            COUNT(transaction_id) AS total_transacoes,
-            ROUND(SUM(amount), 2) AS faturamento_diario
-        FROM '{silver_file}'
-        GROUP BY date
-        ORDER BY date ASC
-    """
-    df_gold_daily = con.execute(query_daily).df()
-    df_gold_daily.to_parquet(gold_dir / "daily_sales.parquet", index=False)
+    df_gold = con.execute(query_gold).df()
+    df_gold.to_parquet(gold_dir / "usd_metrics.parquet", index=False)
 
-    print("[GOLD] Visões analíticas geradas com sucesso via DuckDB!")
-    print("\n--- Resumo: Vendas por Categoria ---")
-    print(df_gold_category)
+    print("[GOLD] Visões analíticas da cotação geradas via DuckDB!")
+    print("\n--- Últimas Cotações do Dólar com Média Móvel ---")
+    print(df_gold.head(10))
+
 
 if __name__ == "__main__":
     process_gold()
